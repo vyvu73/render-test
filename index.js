@@ -1,9 +1,12 @@
+require('dotenv').config()
 const http = require('http')
 const express = require('express')
 const app = express()
 const cors = require('cors')
 
-
+const Note = require('./models/note')
+const password = process.argv[2]
+const PORT = process.env.PORT
 
 let notes = [
   {
@@ -38,27 +41,33 @@ app.get('/', (request, response) => {
   response.send('<h1>Hello World!</h1>')
 })
 app.get('/api/notes', (request, response) => {
-  response.json(notes)
+  Note.find({}).then(notes => {
+    response.json(notes)
+  })
 })
 
-app.get('/api/notes/:id', (request, response) => {
-  const id = request.params.id
-  const note = notes.find(note => note.id === id)
-  
-  if (note) {
-    response.json(note)
-  } else {
-    response.status(404).end()
-  }
+app.get('/api/notes/:id', (request, response, next) => {
+  Note.findById(request.params.id)
+    .then(note => {
+      if (note) {
+        response.json(note)
+      } else {
+        response.status(404).end()
+      }
+    })
+    .catch(error => next(error))
 })
+
 app.delete('/api/notes/:id', (request, response) => {
-  const id = request.params.id
-  notes = notes.filter(note => note.id !== id)
-
-  response.status(204).end()
+   const id = request.params.id
+   Note.deleteOne({ _id: id })
+    .then(result => {
+      response.status(204).end()
+    })
+    .catch(error => next(error))
 })
 
-app.post('/api/notes', (request, response) => {
+app.post('/api/notes', (request, response, next) => {
   const body = request.body
 
   if (!body.content) {
@@ -67,17 +76,52 @@ app.post('/api/notes', (request, response) => {
     })
   }
    
-  const note = {
+  const note = new Note({
     content: body.content,
-    important: body.important || false,
-    id: generateId(),
-  }
+    important: body.important || false
+  })
   
-  notes = notes.concat(note)
-  response.json(note)
+  note.save().then(savedNote => {
+     response.json(note)
+  }).catch(error => next(error))
 })
 
+app.put('/api/notes/:id', (request, response, next) =>{
+  const {content, important} = request.body
 
-const PORT = process.env.PORT || 3001
+  Note.findById(request.params.id)
+    .then(note => {
+      if(!note) return response.status(404).end()
+      note.content = content
+      note.important = important
+
+      return note.save().then((updatedNote) => {
+        response.json(updatedNote)
+      })
+    })
+    .catch(error => next(error))
+})
+
+const unknownEndpoint = (request, response) => {
+  response.status(404).send({ error: 'unknown endpoint' })
+}
+
+app.use(unknownEndpoint)
+
+const errorHandler = (error, request, response, next) => {
+  console.error(error.message)
+
+  if (error.name === 'CastError') {
+    return response.status(400).send({ error: 'malformatted id' })
+  } else if (error.name === "validationError"){
+    return response.status(404).json({error : error.message})
+  }
+
+  next(error)
+}
+
+
+app.use(errorHandler)
+
 app.listen(PORT)
 console.log(`Server running on port ${PORT}`)
